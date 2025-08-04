@@ -9,6 +9,9 @@
     "astro": "astro"
   },
   "dependencies": {
-    "astro": "^5.12.8"
+    "@auth/core": "^0.40.0",
+    "astro": "^5.12.8",
+    "dotenv": "^17.2.1",
+    "google": "^2.1.0"
   }
 }
