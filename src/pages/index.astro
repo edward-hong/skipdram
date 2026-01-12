@@ -1,7 +1,289 @@
 ---
-const loginUrl = '/api/auth/signin/google';
-const logoutUrl = '/api/auth/signout';
+import Layout from '../layouts/Layout.astro';
+import { countries, states, counties } from '../utils/comparison';
+
+// Pass data to client-side
+const populationData = {
+  countries: countries.map(c => ({ name: c.name, population: c.population })),
+  states: states.map(s => ({ name: s.name, population: s.population })),
+  counties: counties.map(c => ({ name: `${c.name}, ${c.state}`, population: c.population }))
+};
 ---
 
-<a href={loginUrl}>Sign in with Google</a>
-<a href={logoutUrl}>Sign out</a>
+<Layout title="SkipDram - Compare Your Followers">
+  <main class="container">
+    <header class="hero">
+      <h1>SkipDram</h1>
+      <p class="tagline">Compare your social media following with populations around the world</p>
+    </header>
+
+    <section class="input-section">
+      <div class="card">
+        <h2>Enter Your Account Details</h2>
+
+        <div class="form-group">
+          <label for="platform">Platform</label>
+          <select id="platform" class="select-input">
+            <option value="youtube">YouTube</option>
+            <option value="twitter">Twitter / X</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="account-name">Account Name</label>
+          <input
+            type="text"
+            id="account-name"
+            class="text-input"
+            placeholder="Enter channel or handle name"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="follower-count">
+            <span id="follower-label">Subscriber</span> Count
+          </label>
+          <input
+            type="number"
+            id="follower-count"
+            class="text-input"
+            placeholder="e.g., 1000000"
+            min="0"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="category">Compare With</label>
+          <select id="category" class="select-input">
+            <option value="all">All (Countries, States & Counties)</option>
+            <option value="countries">Countries Only</option>
+            <option value="states">US States Only</option>
+            <option value="counties">US Counties Only</option>
+          </select>
+        </div>
+
+        <button id="compare-btn" class="btn-primary">Compare Now</button>
+      </div>
+    </section>
+
+    <section id="results-section" class="results-section hidden">
+      <div class="card results-card">
+        <h2>Comparison Results</h2>
+
+        <div class="summary-box">
+          <p class="account-info">
+            <span id="result-platform-icon"></span>
+            <strong id="result-account-name"></strong>
+          </p>
+          <p class="follower-display">
+            <span id="result-follower-count" class="big-number"></span>
+            <span id="result-follower-type">subscribers</span>
+          </p>
+        </div>
+
+        <div id="closest-match" class="closest-match-box">
+          <h3>Closest Population Match</h3>
+          <div class="match-content">
+            <span id="closest-name" class="match-name"></span>
+            <span id="closest-population" class="match-population"></span>
+            <span id="closest-diff" class="match-diff"></span>
+          </div>
+        </div>
+
+        <div class="comparison-tabs">
+          <button class="tab-btn active" data-tab="larger">Larger Than</button>
+          <button class="tab-btn" data-tab="smaller">Smaller Than</button>
+        </div>
+
+        <div id="larger-tab" class="tab-content active">
+          <h3>Your following is larger than:</h3>
+          <ul id="larger-list" class="comparison-list"></ul>
+        </div>
+
+        <div id="smaller-tab" class="tab-content">
+          <h3>Your following is smaller than:</h3>
+          <ul id="smaller-list" class="comparison-list"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</Layout>
+
+<script define:vars={{ populationData }}>
+  // Format numbers for display
+  function formatNumber(num) {
+    if (num >= 1_000_000_000) {
+      return (num / 1_000_000_000).toFixed(2) + 'B';
+    }
+    if (num >= 1_000_000) {
+      return (num / 1_000_000).toFixed(2) + 'M';
+    }
+    if (num >= 1_000) {
+      return (num / 1_000).toFixed(2) + 'K';
+    }
+    return num.toString();
+  }
+
+  function formatWithCommas(num) {
+    return num.toLocaleString();
+  }
+
+  // Comparison logic
+  function compare(followerCount, category) {
+    let items = [];
+
+    if (category === 'all' || category === 'countries') {
+      items = [...items, ...populationData.countries.map(c => ({ ...c, type: 'country' }))];
+    }
+    if (category === 'all' || category === 'states') {
+      items = [...items, ...populationData.states.map(s => ({ ...s, type: 'state' }))];
+    }
+    if (category === 'all' || category === 'counties') {
+      items = [...items, ...populationData.counties.map(c => ({ ...c, type: 'county' }))];
+    }
+
+    const comparisons = items.map(item => ({
+      name: item.name,
+      population: item.population,
+      type: item.type,
+      isLarger: followerCount > item.population,
+      difference: Math.abs(followerCount - item.population)
+    }));
+
+    comparisons.sort((a, b) => a.difference - b.difference);
+
+    return {
+      all: comparisons,
+      larger: comparisons.filter(c => c.isLarger).sort((a, b) => b.population - a.population),
+      smaller: comparisons.filter(c => !c.isLarger).sort((a, b) => a.population - b.population),
+      closest: comparisons[0] || null
+    };
+  }
+
+  function getTypeEmoji(type) {
+    switch(type) {
+      case 'country': return '🌍';
+      case 'state': return '🏛️';
+      case 'county': return '📍';
+      default: return '';
+    }
+  }
+
+  function getTypeLabel(type) {
+    switch(type) {
+      case 'country': return 'Country';
+      case 'state': return 'US State';
+      case 'county': return 'US County';
+      default: return '';
+    }
+  }
+
+  function renderResults(result, platform, accountName, followerCount) {
+    const resultsSection = document.getElementById('results-section');
+    const resultAccountName = document.getElementById('result-account-name');
+    const resultFollowerCount = document.getElementById('result-follower-count');
+    const resultFollowerType = document.getElementById('result-follower-type');
+    const resultPlatformIcon = document.getElementById('result-platform-icon');
+
+    // Update summary
+    resultAccountName.textContent = accountName || 'Your Account';
+    resultFollowerCount.textContent = formatWithCommas(followerCount);
+    resultFollowerType.textContent = platform === 'youtube' ? 'subscribers' : 'followers';
+    resultPlatformIcon.textContent = platform === 'youtube' ? '📺' : '🐦';
+
+    // Closest match
+    if (result.closest) {
+      const closestName = document.getElementById('closest-name');
+      const closestPopulation = document.getElementById('closest-population');
+      const closestDiff = document.getElementById('closest-diff');
+
+      closestName.textContent = `${getTypeEmoji(result.closest.type)} ${result.closest.name}`;
+      closestPopulation.textContent = `Population: ${formatWithCommas(result.closest.population)}`;
+
+      const diffPercent = ((result.closest.difference / result.closest.population) * 100).toFixed(1);
+      const diffDirection = result.closest.isLarger ? 'more' : 'fewer';
+      closestDiff.textContent = `${formatNumber(result.closest.difference)} ${diffDirection} (${diffPercent}% difference)`;
+    }
+
+    // Render lists
+    const largerList = document.getElementById('larger-list');
+    const smallerList = document.getElementById('smaller-list');
+
+    largerList.innerHTML = result.larger.slice(0, 50).map(item => `
+      <li class="comparison-item">
+        <div class="item-main">
+          <span class="item-emoji">${getTypeEmoji(item.type)}</span>
+          <span class="item-name">${item.name}</span>
+          <span class="item-type">${getTypeLabel(item.type)}</span>
+        </div>
+        <div class="item-stats">
+          <span class="item-population">${formatWithCommas(item.population)}</span>
+          <span class="item-diff positive">+${formatNumber(item.difference)}</span>
+        </div>
+      </li>
+    `).join('');
+
+    smallerList.innerHTML = result.smaller.slice(0, 50).map(item => `
+      <li class="comparison-item">
+        <div class="item-main">
+          <span class="item-emoji">${getTypeEmoji(item.type)}</span>
+          <span class="item-name">${item.name}</span>
+          <span class="item-type">${getTypeLabel(item.type)}</span>
+        </div>
+        <div class="item-stats">
+          <span class="item-population">${formatWithCommas(item.population)}</span>
+          <span class="item-diff negative">-${formatNumber(item.difference)}</span>
+        </div>
+      </li>
+    `).join('');
+
+    // Show results section
+    resultsSection.classList.remove('hidden');
+    resultsSection.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // Event listeners
+  document.addEventListener('DOMContentLoaded', () => {
+    const platformSelect = document.getElementById('platform');
+    const followerLabel = document.getElementById('follower-label');
+    const compareBtn = document.getElementById('compare-btn');
+    const tabBtns = document.querySelectorAll('.tab-btn');
+
+    // Update label based on platform
+    platformSelect.addEventListener('change', (e) => {
+      followerLabel.textContent = e.target.value === 'youtube' ? 'Subscriber' : 'Follower';
+    });
+
+    // Compare button click
+    compareBtn.addEventListener('click', () => {
+      const platform = document.getElementById('platform').value;
+      const accountName = document.getElementById('account-name').value;
+      const followerCount = parseInt(document.getElementById('follower-count').value, 10);
+      const category = document.getElementById('category').value;
+
+      if (isNaN(followerCount) || followerCount < 0) {
+        alert('Please enter a valid follower/subscriber count');
+        return;
+      }
+
+      const result = compare(followerCount, category);
+      renderResults(result, platform, accountName, followerCount);
+    });
+
+    // Tab switching
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+
+        tabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        document.querySelectorAll('.tab-content').forEach(content => {
+          content.classList.remove('active');
+        });
+        document.getElementById(`${tab}-tab`).classList.add('active');
+      });
+    });
+  });
+</script>
+</Layout>
